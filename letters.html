@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kotak Surat di Padang Sapi</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', sans-serif; }
+        .screen { width: 100vw; height: 100vh; position: relative; overflow: hidden; }
+        .hidden { display: none !important; }
+
+        /* === STAGE 1: BERANDA KANDANG SAPI === */
+        .kandang-background {
+            width: 100%; height: 100%;
+            background: url('assets/background-kandang.png') no-repeat center center/cover;
+            display: flex; justify-content: center; align-items: center;
+            background-color: #7ed6df; /* Warna cadangan kalau gambar belum di-upload */
+        }
+        #kotak-surat {
+            width: 200px; height: 250px; cursor: pointer; transition: transform 0.3s;
+        }
+        #kotak-surat.closed { background: url('assets/kotak-surat-tutup.png') no-repeat center/contain; background-color: #d2dae2; }
+        #kotak-surat.open { background: url('assets/kotak-surat-buka.png') no-repeat center/contain; background-color: #ffeaa7; }
+        #kotak-surat:hover { transform: scale(1.08); }
+
+        /* === STAGE 2: LIST AMPLOP BERJEJER === */
+        .btn-back {
+            position: absolute; top: 20px; left: 20px; padding: 10px 15px;
+            background: #2c3e50; color: white; border: none; border-radius: 5px; cursor: pointer; z-index: 10;
+        }
+        .tumpukan-amplop {
+            display: flex; justify-content: center; align-items: center;
+            height: 100%; background: #faf4eb; padding: 50px; flex-wrap: wrap;
+        }
+        .amplop {
+            width: 160px; height: 110px;
+            background: url('assets/amplop.png') no-repeat center/contain;
+            background-color: #f5cd79; /* Warna cadangan */
+            cursor: pointer; margin-left: -40px; border-radius: 4px;
+            transition: transform 0.3s ease;
+            box-shadow: -4px 4px 10px rgba(0,0,0,0.1);
+        }
+        /* EFEK INTERAKTIF: AMPLOP TERANGKAT */
+        .amplop:hover {
+            transform: translateY(-35px) rotate(-4deg);
+            z-index: 99;
+        }
+
+        /* === STAGE 3: POPUP BACA SURAT (FEED JALAN) === */
+        .feed-section {
+            display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 20px; width: 100%; max-width: 900px; margin-top: 50px; overflow-y: auto; max-height: 80vh;
+            padding: 20px;
+        }
+        .kartu-surat { background: white; padding: 10px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); }
+        .kartu-surat img { width: 100%; height: auto; border-radius: 4px; }
+
+        /* === STAGE 4: KANVAS TULISAN TANGAN === */
+        .canvas-container {
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            height: 100%; background: #f1f2f6; padding: 20px;
+        }
+        canvas { border: 2px dashed #7f8c8d; background: #fffdf9; cursor: crosshair; max-width: 100%; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        .controls { margin-top: 15px; }
+        .btn { padding: 12px 25px; border: none; border-radius: 8px; font-weight: bold; cursor: pointer; margin: 5px; }
+        .btn-send { background: #2ecc71; color: white; }
+        .btn-clear { background: #e74c3c; color: white; }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+
+    <div id="screen-beranda" class="screen">
+        <div class="kandang-background">
+            <div id="kotak-surat" class="closed" onclick="bukaKotakSurat()"></div>
+        </div>
+    </div>
+
+    <div id="screen-list" class="screen hidden">
+        <button class="btn-back" onclick="keBeranda()">⬅ Kembali</button>
+        
+        <div class="tumpukan-amplop">
+            <div class="amplop" style="background-color: #e17055;" title="Tulis surat baru" onclick="keHalamanKanvas()"></div>
+            
+            <div id="wadah-surat-lama" style="display: flex;">
+                </div>
+        </div>
+    </div>
+
+    <div id="screen-kanvas" class="screen hidden">
+        <button class="btn-back" onclick="keHalamanList()">⬅ Batal</button>
+        <div class="canvas-container">
+            <h3 style="margin-bottom: 10px;">Tulis Surat Kanvasmu ✍️</h3>
+            <canvas id="canvasSurat" width="450" height="550"></canvas>
+            <div class="controls">
+                <button class="btn btn-clear" onclick="hapusCanvas()">Hapus</button>
+                <button class="btn btn-send" id="btnSend" onclick="kirimSurat()">Kirim ke Web 🚀</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // === PASTE CONFIG SUPABASE KAMU DI SINI ===
+        const SUPABASE_URL = "https://lbjhmtbvffoaqwesogxs.supabase.co"; // Sudah dibetulkan tanpa /rest/v1
+        const SUPABASE_KEY = "API_KEY_SUPABASE_KAMU"; // Ganti dengan anon key kamu
+        const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+        // State Kanvas
+        const canvas = document.getElementById('canvasSurat');
+        const ctx = canvas.getContext('2d');
+        let drawing = false;
+
+        // Navigasi Alur Halaman
+        function bukaKotakSurat() {
+            document.getElementById('kotak-surat').className = 'open';
+            setTimeout(() => {
+                document.getElementById('screen-beranda').classList.add('hidden');
+                document.getElementById('screen-list').classList.remove('hidden');
+                muatSuratDariSupabase();
+            }, 600);
+        }
+
+        function keBeranda() {
+            document.getElementById('screen-list').classList.add('hidden');
+            document.getElementById('screen-beranda').classList.remove('hidden');
+            document.getElementById('kotak-surat').className = 'closed';
+        }
+
+        function keHalamanKanvas() {
+            document.getElementById('screen-list').classList.add('hidden');
+            document.getElementById('screen-kanvas').classList.remove('hidden');
+            setupCanvas();
+        }
+
+        function keHalamanList() {
+            document.getElementById('screen-kanvas').classList.add('hidden');
+            document.getElementById('screen-list').classList.remove('hidden');
+            muatSuratDariSupabase();
+        }
+
+        // Logika Menggambar Kanvas (Mouse & Touchscreen HP)
+        function setupCanvas() {
+            canvas.addEventListener('mousedown', () => drawing = true);
+            canvas.addEventListener('mouseup', () => { drawing = false; ctx.beginPath(); });
+            canvas.addEventListener('mousemove', draw);
+
+            canvas.addEventListener('touchstart', (e) => { drawing = true; e.preventDefault(); });
+            canvas.addEventListener('touchend', () => { drawing = false; ctx.beginPath(); });
+            canvas.addEventListener('touchmove', drawTouch);
+        }
+
+        function draw(e) {
+            if (!drawing) return;
+            let rect = canvas.getBoundingClientRect();
+            ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.strokeStyle = '#2c3e50';
+            ctx.lineTo(e.clientX - rect.left, e.clientY - rect.top);
+            ctx.stroke(); ctx.beginPath(); ctx.moveTo(e.clientX - rect.left, e.clientY - rect.top);
+        }
+
+        function drawTouch(e) {
+            if (!drawing) return;
+            let touch = e.touches[0];
+            let rect = canvas.getBoundingClientRect();
+            ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.strokeStyle = '#2c3e50';
+            ctx.lineTo(touch.clientX - rect.left, touch.clientY - rect.top);
+            ctx.stroke(); ctx.beginPath(); ctx.moveTo(touch.clientX - rect.left, touch.clientY - rect.top);
+        }
+
+        function hapusCanvas() { ctx.clearRect(0, 0, canvas.width, canvas.height); }
+
+        // Fungsi Kirim Surat ke Database Supabase
+        async function kirimSurat() {
+            const btn = document.getElementById('btnSend');
+            btn.innerText = "Mengirim..."; btn.disabled = true;
+
+            const dataURL = canvas.toDataURL('image/png');
+
+            const { data, error } = await supabaseClient
+                .from('surat_kanvas')
+                .insert([{ image_data: dataURL }]);
+
+            if (error) {
+                alert("Gagal kirim: " + error.message);
+            } else {
+                alert("Surat kanvasmu berhasil terkirim!");
+                hapusCanvas();
+                keHalamanList();
+            }
+            btn.innerText = "Kirim ke Web 🚀"; btn.disabled = false;
+        }
+
+        // Fungsi Mengambil Surat dari Supabase untuk ditampilkan di dalam Amplop
+        async function muatSuratDariSupabase() {
+            const wadah = document.getElementById('wadah-surat-lama');
+            wadah.innerHTML = "<p style='color:#7f8c8d; margin-left:20px;'>Memuat surat...</p>";
+
+            const { data, error } = await supabaseClient
+                .from('surat_kanvas')
+                .select('*')
+                .order('id', { ascending: false });
+
+            if (error) {
+                wadah.innerHTML = "<p style='color:red; margin-left:20px;'>Gagal memuat.</p>";
+                return;
+            }
+
+            wadah.innerHTML = "";
+            data.forEach(surat => {
+                const amplopSurat = document.createElement('div');
+                amplopSurat.className = "amplop";
+                amplopSurat.onclick = () => {
+                    // Tampilkan gambar surat saat amplop diklik
+                    alert("Membuka Surat...");
+                    let win = window.open();
+                    win.document.write(`<iframe src="${surat.image_data}" frameborder="0" style="border:0; top:0px; left:0px; bottom:0px; right:0px; width:100%; height:100%;" allowfullscreen></iframe>`);
+                };
+                wadah.appendChild(amplopSurat);
+            });
+        }
+    </script>
+</body>
+</html>
